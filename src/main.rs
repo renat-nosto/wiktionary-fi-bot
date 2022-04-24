@@ -12,6 +12,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use telegram_bot::{Api, MessageChat, MessageKind, SendMessage, Update, UpdateKind};
 use reqwest::Client;
+use telegram_bot::ParseMode::MarkdownV2;
 
 fn make_selector(selector: &'static str) -> Selector {
     Selector::parse(selector).expect("bad selector")
@@ -95,20 +96,21 @@ async fn get_update(
                     .unwrap_or("".into());
                 add = s != "Etymology" || s != "Pronunciation" || s != "";
                 if add {
-                    content += &format!("*{s}*");
+                    content += &format!("*{s}*\n");
                 }
                 continue;
             } else {
                 if let Some(e) = ElementRef::wrap(node) {
                     let s:String = e.text().collect();
-                    content += &s;
+                    content += &s ;
+                    content += "\n";
                 }
             }
         }
     }
     state
         .api
-        .spawn(SendMessage::new(m.chat, format!("{q} found\n {content}")));
+        .spawn(SendMessage::new(m.chat, format!("{q} found\n {content}")).parse_mode(MarkdownV2));
 
     // this will be converted into a JSON response
     // with a status code of `201 Created`
