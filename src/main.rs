@@ -11,27 +11,7 @@ use std::fmt::format;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use telegram_bot::{Api, MessageChat, MessageKind, SendMessage, Update, UpdateKind};
-
-macro_rules! tryp {
-    ($expr:expr $(,)?) => {
-        match $expr {
-            Ok(val) => val,
-            Err(err) => {
-                println!("Err {:?}", err);
-                return;
-            }
-        }
-    };
-}
-
-macro_rules! opp {
-    ($expr:expr $(,)?) => {
-        match $expr {
-            Some(val) => val,
-            None => return,
-        }
-    };
-}
+use reqwest::Client;
 
 fn make_selector(selector: &'static str) -> Selector {
     Selector::parse(selector).expect("bad selector")
@@ -40,6 +20,7 @@ fn make_selector(selector: &'static str) -> Selector {
 struct AppState {
     api: Api,
     fin_sel: Selector,
+    client: Client,
 }
 
 // basic handler that responds with a static string
@@ -79,35 +60,26 @@ async fn get_update(
         &text
     };
 
-    let client = reqwest::Client::builder()
-        .gzip(true)
-        .build()
-        .expect("Unable to create client");
-    let a = match client
+
+    let text = match state.client
         .get(&format!(
             "https://en.wiktionary.org/w/index.php?search={q}&go=Go"
         ))
         .send()
-        .await
-    {
+        .await {
         Ok(val) => val,
         Err(err) => {
             println!("Err {:?}", err);
             return ret;
         }
-    };
-    let text = tryp!(a.text().await);
-    let dom = Html::parse_document(&text);
-    let mut el = dom.select(&state.fin_sel);
+    }.text().await.expect("failed to read text");
+    let html = Html::parse_document(&text);
+    let mut el = html.select(&state.fin_sel);
 
     let par = match el.next().and_then(|o| o.parent()) {
         Some(x) => x,
         None => return ret,
     };
-    state
-        .api
-        .send(SendMessage::new(m.chat, format!("{q} found")))
-        .await;
 
     let mut add = false;
     let mut content = String::new();
@@ -127,9 +99,17 @@ async fn get_update(
                 }
                 continue;
             } else {
+                if let Some(e) = ElementRef::wrap(node) {
+                    let s:String = e.text().collect();
+                    content += &s;
+                }
             }
         }
     }
+    state
+        .api
+        .spawn(SendMessage::new(m.chat, format!("{q} found\n {content}")));
+
     // this will be converted into a JSON response
     // with a status code of `201 Created`
     (StatusCode::OK, Json(""))
@@ -160,6 +140,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .layer(Extension(Arc::new(AppState {
             api,
             fin_sel: make_selector("#Finnish"),
+            client
         })));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
