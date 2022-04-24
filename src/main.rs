@@ -1,15 +1,16 @@
+use axum::response::IntoResponse;
+use axum::{
+    routing::{get, post},
+    Extension, Json, Router,
+};
+use ego_tree::NodeRef;
+use reqwest::StatusCode;
+use scraper::{ElementRef, Html, Node, Selector};
 use std::error::Error;
 use std::fmt::format;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use axum::{Extension, Json, Router, routing::{get, post}};
-use axum::response::IntoResponse;
-use reqwest::StatusCode;
-use scraper::{ElementRef, Html, Node, Selector};
 use telegram_bot::{Api, MessageChat, MessageKind, SendMessage, Update, UpdateKind};
-use ego_tree::{
-    NodeRef
-};
 
 macro_rules! tryp {
     ($expr:expr $(,)?) => {
@@ -17,7 +18,7 @@ macro_rules! tryp {
             Ok(val) => val,
             Err(err) => {
                 println!("Err {:?}", err);
-                return
+                return;
             }
         }
     };
@@ -27,9 +28,7 @@ macro_rules! opp {
     ($expr:expr $(,)?) => {
         match $expr {
             Some(val) => val,
-            None => {
-                return
-            }
+            None => return,
         }
     };
 }
@@ -43,48 +42,72 @@ struct AppState {
     fin_sel: Selector,
 }
 
-
 // basic handler that responds with a static string
 async fn root() -> &'static str {
     "Hello, World!"
 }
 
-async fn handle(update: Update, state: Arc<AppState>) {
+
+fn first_element_child(node: NodeRef<Node>) -> Option<ElementRef> {
+    ElementRef::wrap(ElementRef::wrap(node)?.first_child()?)
+}
+
+async fn get_update(
+    Json(update): Json<Update>,
+    Extension(state): Extension<Arc<AppState>>,
+    // (Json(update), Extension(state)): (Json<Update>, Extension<Arc<AppState>>)
+) -> impl IntoResponse {
+    println!("{:?}", update);
+    let ret = (StatusCode::OK, Json(""));
+    // insert your application logic here
     let m = match update.kind {
         UpdateKind::Message(m) => m,
-        _ => return
+        _ => return ret,
     };
     let text = match m.kind {
-        MessageKind::Text { data, entities } => { data }
-        _ => return
+        MessageKind::Text { data, entities } => data,
+        _ => return ret,
     };
     let is_group = matches!(m.chat, MessageChat::Group(_) | MessageChat::Supergroup(_));
     let q = if is_group {
         if let Some(text) = text.strip_prefix("/fw ") {
             text
         } else {
-            return;
+            return ret;
         }
     } else {
         &text
     };
 
-    let client = reqwest::Client::builder().gzip(true).build().expect("Unable to create client");
-    let a = tryp!(client.get(&format!("https://en.wiktionary.org/w/index.php?search={q}&go=Go"))
+    let client = reqwest::Client::builder()
+        .gzip(true)
+        .build()
+        .expect("Unable to create client");
+    let a = match client
+        .get(&format!(
+            "https://en.wiktionary.org/w/index.php?search={q}&go=Go"
+        ))
         .send()
-        .await);
+        .await
+    {
+        Ok(val) => val,
+        Err(err) => {
+            println!("Err {:?}", err);
+            return ret;
+        }
+    };
     let text = tryp!(a.text().await);
     let dom = Html::parse_document(&text);
     let mut el = dom.select(&state.fin_sel);
 
     let par = match el.next().and_then(|o| o.parent()) {
         Some(x) => x,
-        None => return
+        None => return ret,
     };
-    state.api.send(SendMessage::new(
-        m.chat,
-        format!("{q} found"),
-    )).await;
+    state
+        .api
+        .send(SendMessage::new(m.chat, format!("{q} found")))
+        .await;
 
     let mut add = false;
     let mut content = String::new();
@@ -95,32 +118,18 @@ async fn handle(update: Update, state: Arc<AppState>) {
                 break;
             }
             if &el.name.local == "h3" {
-                let s: String = first_element_child(node).map(|e| e.inner_html()).unwrap_or("".into());
+                let s: String = first_element_child(node)
+                    .map(|e| e.inner_html())
+                    .unwrap_or("".into());
                 add = s != "Etymology" || s != "Pronunciation" || s != "";
                 if add {
                     content += &format!("*{s}*");
                 }
-                continue
+                continue;
+            } else {
             }
-            
         }
     }
-
-    ;
-}
-
-fn first_element_child<'a>(node: NodeRef<'a, Node>) -> Option<ElementRef<'a>> {
-    ElementRef::wrap(ElementRef::wrap(node)?.first_child()?)
-}
-
-async fn get_update(
-    // this argument tells axum to parse the request body
-    // as JSON into a `CreateUser` type
-    Json(update): Json<Update>,
-    Extension(state): Extension<Arc<AppState>>,
-) -> impl IntoResponse {
-    // insert your application logic here
-    handle(update, state.clone()).await;
     // this will be converted into a JSON response
     // with a status code of `201 Created`
     (StatusCode::OK, Json(""))
@@ -131,12 +140,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let token = std::env::var("BOT_TOKEN").expect("Wrong token string");
     let origin = std::env::var("ORIGIN").expect("Wrong origin string");
     let path = std::env::var("SECRET_PATH").expect("Wrong secret string");
-    let port = std::env::var("PORT").expect("Wrong port set").parse().expect("Port is not a number");
+    let port = std::env::var("PORT")
+        .expect("Wrong port set")
+        .parse()
+        .expect("Port is not a number");
     let hook_url = format!("https://api.telegram.org/bot{token}/setWebhook?url={origin}{path}");
     let api = Api::new(token);
     let client = reqwest::Client::builder().gzip(true).build()?;
-    println!("Setting up hook: {:?}", client.get(hook_url).send().await?.text().await?);
-
+    println!(
+        "Setting up hook: {:?}",
+        client.get(hook_url).send().await?.text().await?
+    );
 
     let app = Router::new()
         // `GET /` goes to `root`
@@ -154,7 +168,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .serve(app.into_make_service())
         .await
         .unwrap();
-
 
     Ok(())
     //let mut stream = api.stream();
