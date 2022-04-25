@@ -4,14 +4,14 @@ use axum::{
     Extension, Json, Router,
 };
 use ego_tree::NodeRef;
+use reqwest::Client;
 use reqwest::StatusCode;
 use scraper::{ElementRef, Html, Node, Selector};
 use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use telegram_bot::ParseMode::Markdown;
 use telegram_bot::{Api, MessageChat, MessageKind, SendMessage, Update, UpdateKind};
-use reqwest::Client;
-use telegram_bot::ParseMode::{Markdown};
 
 fn make_selector(selector: &'static str) -> Selector {
     Selector::parse(selector).expect("bad selector")
@@ -27,7 +27,6 @@ struct AppState {
 async fn root() -> &'static str {
     "Hello, World!"
 }
-
 
 fn first_element_child(node: NodeRef<Node>) -> Option<ElementRef> {
     ElementRef::wrap(ElementRef::wrap(node)?.first_child()?)
@@ -45,15 +44,15 @@ async fn get_update(
         UpdateKind::Message(m) => m,
         _ => {
             println!("Not a message");
-            return ret
-        },
+            return ret;
+        }
     };
     let text = match m.kind {
         MessageKind::Text { data, entities: _ } => data,
         _ => {
             println!("Not a text");
-            return ret
-        },
+            return ret;
+        }
     };
     let is_group = matches!(m.chat, MessageChat::Group(_) | MessageChat::Supergroup(_));
     let q = if is_group {
@@ -68,18 +67,23 @@ async fn get_update(
     };
 
     println!("Query: {:?}", q);
-    let text = match state.client
+    let text = match state
+        .client
         .get(&format!(
             "https://en.wiktionary.org/w/index.php?search={q}&go=Go"
         ))
         .send()
-        .await {
+        .await
+    {
         Ok(val) => val,
         Err(err) => {
             println!("Err {:?}", err);
             return ret;
         }
-    }.text().await.expect("failed to read text");
+    }
+    .text()
+    .await
+    .expect("failed to read text");
     let html = Html::parse_document(&text);
     let mut el = html.select(&state.fin_sel);
 
@@ -87,8 +91,8 @@ async fn get_update(
         Some(x) => x,
         None => {
             println!("No parent of finish found");
-            return ret
-        },
+            return ret;
+        }
     };
 
     let mut add = false;
@@ -107,18 +111,19 @@ async fn get_update(
                     && s != "Pronunciation"
                     && s != ""
                     && s != "Anagrams"
-                    && s != "Conjugation";
+                    && s != "Conjugation"
+                    && s != "Declension";
                 if add {
                     content += &format!("_{s}_\n");
                 }
                 continue;
             } else {
-                if !add || &el.name.local == "div" || &el.name.local == "table"{
-                    continue
+                if !add || &el.name.local == "div" || &el.name.local == "table" {
+                    continue;
                 }
                 if let Some(e) = ElementRef::wrap(node) {
-                    let s:String = e.text().filter(|e| *e!="edit").collect();
-                    content += &s ;
+                    let s: String = e.text().filter(|e| *e != "edit").collect();
+                    content += &s;
                     content += "\n";
                 }
             }
@@ -159,7 +164,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .layer(Extension(Arc::new(AppState {
             api,
             fin_sel: make_selector("#Finnish"),
-            client
+            client,
         })));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
