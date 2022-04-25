@@ -113,7 +113,7 @@ async fn get_update(
                     continue
                 }
                 if let Some(e) = ElementRef::wrap(node) {
-                    let s:String = e.text().filter(|e| e!="edit").collect();
+                    let s:String = e.text().filter(|e| *e!="edit").collect();
                     content += &s ;
                     content += "\n";
                 }
