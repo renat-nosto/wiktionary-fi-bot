@@ -107,12 +107,13 @@ async fn get_update(
                 let s: String = first_element_child(node)
                     .map(|e| e.inner_html())
                     .unwrap_or("".into());
-                add = !s.starts_with("Etymology")
-                    && s != "Pronunciation"
+                add = s != "Pronunciation"
                     && s != ""
                     && s != "Anagrams"
                     && s != "Conjugation"
-                    && s != "Declension";
+                    && s != "Declension"
+                    && s != "Derived terms"
+                    && s != "Related terms";
                 if add {
                     content += &format!("_{s}_\n");
                 }
