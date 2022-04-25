@@ -44,24 +44,31 @@ async fn get_update(
     // insert your application logic here
     let m = match update.kind {
         UpdateKind::Message(m) => m,
-        _ => return ret,
+        _ => {
+            println!("Not a message");
+            return ret
+        },
     };
     let text = match m.kind {
         MessageKind::Text { data, entities } => data,
-        _ => return ret,
+        _ => {
+            println!("Not a text");
+            return ret
+        },
     };
     let is_group = matches!(m.chat, MessageChat::Group(_) | MessageChat::Supergroup(_));
     let q = if is_group {
         if let Some(text) = text.strip_prefix("/fw ") {
             text
         } else {
+            println!("Bad Query: {:?}", text);
             return ret;
         }
     } else {
         &text
     };
 
-
+    println!("Query: {:?}", q);
     let text = match state.client
         .get(&format!(
             "https://en.wiktionary.org/w/index.php?search={q}&go=Go"
@@ -79,7 +86,10 @@ async fn get_update(
 
     let par = match el.next().and_then(|o| o.parent()) {
         Some(x) => x,
-        None => return ret,
+        None => {
+            println!("No parent of finish found");
+            return ret
+        },
     };
 
     let mut add = false;
@@ -100,6 +110,9 @@ async fn get_update(
                 }
                 continue;
             } else {
+                if !add {
+                    continue
+                }
                 if let Some(e) = ElementRef::wrap(node) {
                     let s:String = e.text().collect();
                     content += &s ;
