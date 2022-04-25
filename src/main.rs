@@ -99,11 +99,15 @@ async fn get_update(
             if "h2" == &el.name.local {
                 break;
             }
-            if &el.name.local == "h3" {
+            if &el.name.local == "h3" || &el.name.local == "h4" {
                 let s: String = first_element_child(node)
                     .map(|e| e.inner_html())
                     .unwrap_or("".into());
-                add = !s.starts_with("Etymology") && s != "Pronunciation" && s != "" && s != "Anagrams";
+                add = !s.starts_with("Etymology")
+                    && s != "Pronunciation"
+                    && s != ""
+                    && s != "Anagrams"
+                    && s != "Conjugation";
                 if add {
                     content += &format!("_{s}_\n");
                 }
