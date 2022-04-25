@@ -7,12 +7,11 @@ use ego_tree::NodeRef;
 use reqwest::StatusCode;
 use scraper::{ElementRef, Html, Node, Selector};
 use std::error::Error;
-use std::fmt::format;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use telegram_bot::{Api, MessageChat, MessageKind, SendMessage, Update, UpdateKind};
 use reqwest::Client;
-use telegram_bot::ParseMode::{Markdown, MarkdownV2};
+use telegram_bot::ParseMode::{Markdown};
 
 fn make_selector(selector: &'static str) -> Selector {
     Selector::parse(selector).expect("bad selector")
@@ -50,7 +49,7 @@ async fn get_update(
         },
     };
     let text = match m.kind {
-        MessageKind::Text { data, entities } => data,
+        MessageKind::Text { data, entities: _ } => data,
         _ => {
             println!("Not a text");
             return ret
@@ -104,7 +103,7 @@ async fn get_update(
                 let s: String = first_element_child(node)
                     .map(|e| e.inner_html())
                     .unwrap_or("".into());
-                add = !s.starts_with("Etymology") && s != "Pronunciation" && s != "";
+                add = !s.starts_with("Etymology") && s != "Pronunciation" && s != "" && s != "Anagrams";
                 if add {
                     content += &format!("_{s}_\n");
                 }
@@ -114,13 +113,14 @@ async fn get_update(
                     continue
                 }
                 if let Some(e) = ElementRef::wrap(node) {
-                    let s:String = e.text().collect();
+                    let s:String = e.text().filter(|e| e!="edit").collect();
                     content += &s ;
                     content += "\n";
                 }
             }
         }
     }
+    println!("sending: {:?}", content);
     state
         .api
         .spawn(SendMessage::new(m.chat, format!("*{q}*\n {content}")).parse_mode(Markdown));
