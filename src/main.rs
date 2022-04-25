@@ -12,7 +12,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use telegram_bot::{Api, MessageChat, MessageKind, SendMessage, Update, UpdateKind};
 use reqwest::Client;
-use telegram_bot::ParseMode::MarkdownV2;
+use telegram_bot::ParseMode::{Markdown, MarkdownV2};
 
 fn make_selector(selector: &'static str) -> Selector {
     Selector::parse(selector).expect("bad selector")
@@ -104,9 +104,9 @@ async fn get_update(
                 let s: String = first_element_child(node)
                     .map(|e| e.inner_html())
                     .unwrap_or("".into());
-                add = s != "Etymology" || s != "Pronunciation" || s != "";
+                add = !s.starts_with("Etymology") && s != "Pronunciation" && s != "";
                 if add {
-                    content += &format!("*{s}*\n");
+                    content += &format!("_{s}_\n");
                 }
                 continue;
             } else {
@@ -123,7 +123,7 @@ async fn get_update(
     }
     state
         .api
-        .spawn(SendMessage::new(m.chat, format!("{q} found\n {content}")).parse_mode(MarkdownV2));
+        .spawn(SendMessage::new(m.chat, format!("*{q}*\n {content}")).parse_mode(Markdown));
 
     // this will be converted into a JSON response
     // with a status code of `201 Created`
