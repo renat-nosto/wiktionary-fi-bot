@@ -112,6 +112,7 @@ async fn get_update(
                     && s != "Anagrams"
                     && s != "Conjugation"
                     && s != "Declension"
+                    && s != "References"
                     && s != "Derived terms"
                     && s != "Related terms";
                 if add {
@@ -123,7 +124,7 @@ async fn get_update(
                     continue;
                 }
                 if let Some(e) = ElementRef::wrap(node) {
-                    let s: String = e.text().filter(|e| *e != "edit").collect();
+                    let s: String = e.text().filter(|e| *e != "edit").map(|s| s.replace('*', "")).collect();
                     content += &s;
                     content += "\n";
                 }
