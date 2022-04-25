@@ -113,7 +113,7 @@ async fn get_update(
                 }
                 continue;
             } else {
-                if !add {
+                if !add || &el.name.local == "div" || &el.name.local == "table"{
                     continue
                 }
                 if let Some(e) = ElementRef::wrap(node) {
