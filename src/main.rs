@@ -1,31 +1,91 @@
-use axum::response::IntoResponse;
 use axum::{
+    response::IntoResponse,
     routing::{get, post},
     Extension, Json, Router,
 };
 use ego_tree::NodeRef;
-use reqwest::Client;
-use reqwest::StatusCode;
+use reqwest::{Client, StatusCode};
 use scraper::{ElementRef, Html, Node, Selector};
-use std::error::Error;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use telegram_bot::ParseMode::Markdown;
-use telegram_bot::{Api, MessageChat, MessageKind, SendMessage, Update, UpdateKind};
+use std::{collections::HashSet, error::Error, fmt::Write, net::SocketAddr, sync::Arc};
+use telegram_bot::{
+    Api, MessageChat, MessageKind, ParseMode::Markdown, SendMessage, ToChatRef, Update, UpdateKind,
+};
 
-fn make_selector(selector: &'static str) -> Selector {
+fn make_selector(selector: &str) -> Selector {
     Selector::parse(selector).expect("bad selector")
+}
+
+struct Selectors {
+    finnish: Selector,
+    nouns: Vec<Selector>,
+    verbs: Vec<Selector>,
+}
+
+impl Selectors {
+    fn new() -> Self {
+        Selectors {
+            finnish: make_selector("#Finnish"),
+            nouns: ["par", "all"]
+                .into_iter()
+                .flat_map(|infl| {
+                    ["s", "p"]
+                        .into_iter()
+                        .map(move |t| make_selector(&format!(".lang-fi.{infl}\\|{t}-form-of")))
+                })
+                .collect(),
+            verbs: ["pres", "past"]
+                .into_iter()
+                .flat_map(move |tense| {
+                    ["1", "3"].into_iter().map(move |per| {
+                        make_selector(&format!(".lang-fi.\\3{per} \\|s\\|{tense}\\|indc-form-of"))
+                    })
+                })
+                .collect(),
+        }
+    }
 }
 
 struct AppState {
     api: Api,
-    fin_sel: Selector,
+    selectors: Selectors,
     client: Client,
+    skip_chapters: HashSet<String>,
+}
+
+impl AppState {
+    fn new(token: &str) -> Self {
+        AppState {
+            api: Api::new(token),
+            selectors: Selectors::new(),
+            client: Client::builder()
+                .gzip(true)
+                .build()
+                .expect("Failed to create a reqwest client"),
+            skip_chapters: [
+                "Pronunciation",
+                "",
+                "Anagrams",
+                "Conjugation",
+                "Declension",
+                "References",
+                "Derived terms",
+                "Related terms",
+            ]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+        }
+    }
+
+    fn send_markdown<C: ToChatRef>(&self, chat: C, text: String) {
+        self.api
+            .spawn(SendMessage::new(chat, text).parse_mode(Markdown));
+    }
 }
 
 // basic handler that responds with a static string
 async fn root() -> &'static str {
-    "Hello, World!"
+    "Bot is working..."
 }
 
 fn first_element_child(node: NodeRef<Node>) -> Option<ElementRef> {
@@ -35,26 +95,28 @@ fn first_element_child(node: NodeRef<Node>) -> Option<ElementRef> {
 async fn get_update(
     Json(update): Json<Update>,
     Extension(state): Extension<Arc<AppState>>,
-    // (Json(update), Extension(state)): (Json<Update>, Extension<Arc<AppState>>)
 ) -> impl IntoResponse {
     println!("{:?}", update);
     let ret = (StatusCode::OK, Json(""));
     // insert your application logic here
-    let m = match update.kind {
+    let message = match update.kind {
         UpdateKind::Message(m) => m,
         _ => {
             println!("Not a message");
             return ret;
         }
     };
-    let text = match m.kind {
+    let text = match message.kind {
         MessageKind::Text { data, entities: _ } => data,
         _ => {
             println!("Not a text");
             return ret;
         }
     };
-    let is_group = matches!(m.chat, MessageChat::Group(_) | MessageChat::Supergroup(_));
+    let is_group = matches!(
+        message.chat,
+        MessageChat::Group(_) | MessageChat::Supergroup(_)
+    );
     let q = if is_group {
         if let Some(text) = text.strip_prefix("/fw ") {
             text
@@ -77,19 +139,21 @@ async fn get_update(
     {
         Ok(val) => val,
         Err(err) => {
+            state.send_markdown(&message.chat, format!("{q} - error {err:?}"));
             println!("Err {:?}", err);
             return ret;
         }
     }
-    .text()
-    .await
-    .expect("failed to read text");
+        .text()
+        .await
+        .expect("failed to read text");
     let html = Html::parse_document(&text);
-    let mut el = html.select(&state.fin_sel);
+    let mut el = html.select(&state.selectors.finnish);
 
     let par = match el.next().and_then(|o| o.parent()) {
         Some(x) => x,
         None => {
+            state.send_markdown(&message.chat, format!("{q} not found in Finnish"));
             println!("No parent of finish found");
             return ret;
         }
@@ -107,16 +171,9 @@ async fn get_update(
                 let s: String = first_element_child(node)
                     .map(|e| e.inner_html())
                     .unwrap_or("".into());
-                add = s != "Pronunciation"
-                    && s != ""
-                    && s != "Anagrams"
-                    && s != "Conjugation"
-                    && s != "Declension"
-                    && s != "References"
-                    && s != "Derived terms"
-                    && s != "Related terms";
+                add = !state.skip_chapters.contains(&s);
                 if add {
-                    content += &format!("_{s}_\n");
+                    writeln!(content, "_{s}_");
                 }
                 continue;
             } else {
@@ -124,20 +181,49 @@ async fn get_update(
                     continue;
                 }
                 if let Some(e) = ElementRef::wrap(node) {
-                    let s: String = e.text().filter(|e| *e != "edit").map(|s| s.replace('*', "")).collect();
-                    content += &s;
-                    content += "\n";
+                    e.text()
+                        .filter(|e| *e != "edit")
+                        .map(|s| s.replace('*', ""))
+                        .for_each(|s| {
+                            write!(content, "{s}");
+                        });
+                    writeln!(content);
                 }
             }
         }
     }
-    println!("sending: {:?}", content);
-    state
-        .api
-        .spawn(SendMessage::new(m.chat, format!("*{q}*\n {content}")).parse_mode(Markdown));
+    let [ns, vs] = [&state.selectors.nouns, &state.selectors.verbs].map(|sels| {
+        sels.iter()
+            .map(|sel| {
+                html.select(sel)
+                    .next()
+                    .map(|e| e.text().collect::<String>())
+            })
+            .collect::<Vec<_>>()
+    });
+    if let [Some(par_s), Some(par_p), Some(ines_s), Some(ines_p)] = ns.as_slice() {
+        let vartalo = ines_s.trim_end_matches("lle");
+        let mon_vartalo = ines_p.trim_end_matches("lle");
+        writeln!(content, "_Vartalot_\n{vartalo} - {mon_vartalo} p. {par_s} m.p. {par_p}");
+    }
+    if let [Some(pr1), Some(pr3), Some(pa1), Some(pa3)] = vs.as_slice() {
+        let vartalo = pr1.trim_end_matches("n");
+        let past_vartalo = pa1.trim_end_matches("n");
+        write!(content, "_Vartalot_\n{vartalo} - {past_vartalo}");
+        if let Some(c) = vartalo.chars().last() {
+            if pr3 != &format!("{vartalo}{c}") {
+                write!(content, " p3. {pr3}");
+            }
+        }
+        if pa3 != past_vartalo {
+            write!(content, " past3. {pa3}");
+        }
+        writeln!(content) ;
+    }
 
-    // this will be converted into a JSON response
-    // with a status code of `201 Created`
+    writeln!(content, "https://en.wiktionary.org/wiki/{q}#Finnish");
+    println!("sending: {:?}", content);
+    state.send_markdown(&message.chat, format!("*{q}*\n{content}"));
     (StatusCode::OK, Json(""))
 }
 
@@ -150,12 +236,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .expect("Wrong port set")
         .parse()
         .expect("Port is not a number");
-    let hook_url = format!("https://api.telegram.org/bot{token}/setWebhook?url={origin}{path}");
-    let api = Api::new(token);
-    let client = reqwest::Client::builder().gzip(true).build()?;
+
+    let state = AppState::new(&token);
     println!(
         "Setting up hook: {:?}",
-        client.get(hook_url).send().await?.text().await?
+        state
+            .client
+            .get(format!(
+                "https://api.telegram.org/bot{token}/setWebhook?url={origin}{path}"
+            ))
+            .send()
+            .await?
+            .text()
+            .await?
     );
 
     let app = Router::new()
@@ -163,50 +256,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .route("/health", get(root))
         // `POST /users` goes to `get_update`
         .route(&path, post(get_update))
-        .layer(Extension(Arc::new(AppState {
-            api,
-            fin_sel: make_selector("#Finnish"),
-            client,
-        })));
+        .layer(Extension(Arc::new(state)));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    //tracing::debug!("listening on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
         .unwrap();
 
     Ok(())
-    //let mut stream = api.stream();
-
-    // loop {
-    //     let update = match stream.next().await {
-    //         Some(Ok(u)) => u,
-    //         other => {
-    //             println!("{:?}", other);
-    //             continue;
-    //         }
-    //     };
-    //     let m= match  update.kind {
-    //         UpdateKind::Message(m) => m,
-    //         _ => continue;
-    //     }
-    //         let text = match m.kind {
-    //             MessageKind::Text { data, entities } => { data }
-    //             _ => continue
-    //         };
-    //         let is_group = matches!(m.chat, MessageChat::Group(_) | MessageChat::Supergroup(_));
-    //         let q = if is_group {
-    //             if let Some(text) = text.strip_prefix("fw ") {
-    //                 text
-    //             } else {
-    //                 continue;
-    //             }
-    //         } else {
-    //             &text
-    //         };
-    //
-    //
-    //     //api.stream()
-    // }
 }
