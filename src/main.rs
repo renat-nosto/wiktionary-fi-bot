@@ -177,7 +177,7 @@ async fn get_update(
                 }
                 continue;
             } else {
-                if !add || &el.name.local == "div" || &el.name.local == "table" {
+                if !add || &el.name.local == "div" || &el.name.local == "table" || &el.name.local == "style" {
                     continue;
                 }
                 if let Some(e) = ElementRef::wrap(node) {
