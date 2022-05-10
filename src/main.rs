@@ -113,20 +113,21 @@ async fn get_update(
             return ret;
         }
     };
-    let is_group = matches!(
-        message.chat,
-        MessageChat::Group(_) | MessageChat::Supergroup(_)
-    );
-    let q = if is_group {
-        if let Some(text) = text.strip_prefix("/fw ") {
-            text
-        } else {
-            println!("Bad Query: {:?}", text);
-            return ret;
-        }
-    } else {
-        &text
-    };
+    // let is_group = matches!(
+    //     message.chat,
+    //     MessageChat::Group(_) | MessageChat::Supergroup(_)
+    // );
+    // let q = if is_group {
+    //     if let Some(text) = text.strip_prefix("/fw ") {
+    //         text
+    //     } else {
+    //         println!("Bad Query: {:?}", text);
+    //         return ret;
+    //     }
+    // } else {
+    //     &text
+    // };
+    let q = &text;
 
     println!("Query: {:?}", q);
     let text = match state
@@ -168,13 +169,15 @@ async fn get_update(
                 break;
             }
             if &el.name.local == "h3" || &el.name.local == "h4" {
-                let s: String = first_element_child(node)
-                    .map(|e| e.inner_html())
-                    .unwrap_or("".into());
-                add = !state.skip_chapters.contains(&s);
-                if add {
-                    writeln!(content, "_{s}_");
+`                let s = first_element_child(node)
+                    .map(|e| e.inner_html());
+                if let Some(s) = s {
+                    add = !state.skip_chapters.contains(&s);
+                    if add {
+                        let _ = writeln!(content, "_{s}_");
+                    }
                 }
+                add = false;
                 continue;
             } else {
                 if !add || &el.name.local == "div" || &el.name.local == "table" || &el.name.local == "style" {
@@ -185,9 +188,9 @@ async fn get_update(
                         .filter(|e| *e != "edit")
                         .map(|s| s.replace('*', ""))
                         .for_each(|s| {
-                            write!(content, "{s}");
+                            let _ = write!(content, "{s}");
                         });
-                    writeln!(content);
+                    let _ = writeln!(content);
                 }
             }
         }
@@ -204,24 +207,24 @@ async fn get_update(
     if let [Some(par_s), Some(par_p), Some(ines_s), Some(ines_p)] = ns.as_slice() {
         let vartalo = ines_s.trim_end_matches("lle");
         let mon_vartalo = ines_p.trim_end_matches("lle");
-        writeln!(content, "_Vartalot_\n{vartalo} - {mon_vartalo} p. {par_s} m.p. {par_p}");
+        let _ = writeln!(content, "_Vartalot_\n{vartalo} - {mon_vartalo} p. {par_s} m.p. {par_p}");
     }
     if let [Some(pr1), Some(pr3), Some(pa1), Some(pa3)] = vs.as_slice() {
-        let vartalo = pr1.trim_end_matches("n");
-        let past_vartalo = pa1.trim_end_matches("n");
-        write!(content, "_Vartalot_\n{vartalo} - {past_vartalo}");
+        let vartalo = pr1.trim_end_matches('n');
+        let past_vartalo = pa1.trim_end_matches('n');
+        let _ = write!(content, "_Vartalot_\n{vartalo} - {past_vartalo}");
         if let Some(c) = vartalo.chars().last() {
             if pr3 != &format!("{vartalo}{c}") {
-                write!(content, " p3. {pr3}");
+                let _ = write!(content, " p3. {pr3}");
             }
         }
         if pa3 != past_vartalo {
-            write!(content, " past3. {pa3}");
+            let _ = write!(content, " past3. {pa3}");
         }
-        writeln!(content) ;
+        let _ = writeln!(content) ;
     }
 
-    writeln!(content, "https://en.wiktionary.org/wiki/{q}#Finnish");
+    let _ = writeln!(content, "https://en.wiktionary.org/wiki/{q}#Finnish");
     println!("sending: {:?}", content);
     state.send_markdown(&message.chat, format!("*{q}*\n{content}"));
     (StatusCode::OK, Json(""))
