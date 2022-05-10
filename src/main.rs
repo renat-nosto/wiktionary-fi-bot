@@ -7,9 +7,7 @@ use ego_tree::NodeRef;
 use reqwest::{Client, StatusCode};
 use scraper::{ElementRef, Html, Node, Selector};
 use std::{collections::HashSet, error::Error, fmt::Write, net::SocketAddr, sync::Arc};
-use telegram_bot::{
-    Api, MessageKind, ParseMode::Markdown, SendMessage, ToChatRef, Update, UpdateKind,
-};
+use telegram_bot::{Api, MessageChat, MessageKind, ParseMode::Markdown, SendMessage, ToChatRef, Update, UpdateKind};
 
 fn make_selector(selector: &str) -> Selector {
     Selector::parse(selector).expect("bad selector")
@@ -107,27 +105,27 @@ async fn get_update(
         }
     };
     let text = match message.kind {
-        MessageKind::Text { data, entities: _ } => data,
+        MessageKind::Text { data, entities: _ } => data.to_lowercase(),
         _ => {
             println!("Not a text");
             return ret;
         }
     };
-    // let is_group = matches!(
-    //     message.chat,
-    //     MessageChat::Group(_) | MessageChat::Supergroup(_)
-    // );
-    // let q = if is_group {
-    //     if let Some(text) = text.strip_prefix("/fw ") {
-    //         text
-    //     } else {
-    //         println!("Bad Query: {:?}", text);
-    //         return ret;
-    //     }
-    // } else {
-    //     &text
-    // };
-    let q = &text;
+    let is_group = matches!(
+        message.chat,
+        MessageChat::Group(_) | MessageChat::Supergroup(_)
+    );
+    let q = if is_group {
+        if let Some(text) = text.strip_prefix("/w ").or_else(|| text.strip_prefix("/")) {
+            text
+        } else {
+            println!("Bad Query: {:?}", text);
+            return ret;
+        }
+    } else {
+        text.trim_start_matches('/')
+    };
+
 
     println!("Query: {:?}", q);
     let text = match state
@@ -174,7 +172,7 @@ async fn get_update(
                     .unwrap_or("".into());
                     add = !state.skip_chapters.contains(&s);
                     if add {
-                    writeln!(content, "_{s}_");
+                        let _ = writeln!(content, "_{s}_");
                     }
                 continue;
             } else {
