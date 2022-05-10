@@ -8,7 +8,7 @@ use reqwest::{Client, StatusCode};
 use scraper::{ElementRef, Html, Node, Selector};
 use std::{collections::HashSet, error::Error, fmt::Write, net::SocketAddr, sync::Arc};
 use telegram_bot::{
-    Api, MessageChat, MessageKind, ParseMode::Markdown, SendMessage, ToChatRef, Update, UpdateKind,
+    Api, MessageKind, ParseMode::Markdown, SendMessage, ToChatRef, Update, UpdateKind,
 };
 
 fn make_selector(selector: &str) -> Selector {
@@ -169,7 +169,7 @@ async fn get_update(
                 break;
             }
             if &el.name.local == "h3" || &el.name.local == "h4" {
-`                let s = first_element_child(node)
+                let s = first_element_child(node)
                     .map(|e| e.inner_html());
                 if let Some(s) = s {
                     add = !state.skip_chapters.contains(&s);
