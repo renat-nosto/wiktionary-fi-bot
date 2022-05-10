@@ -169,15 +169,13 @@ async fn get_update(
                 break;
             }
             if &el.name.local == "h3" || &el.name.local == "h4" {
-                let s = first_element_child(node)
-                    .map(|e| e.inner_html());
-                if let Some(s) = s {
+                let s: String = first_element_child(node)
+                    .map(|e| e.inner_html())
+                    .unwrap_or("".into());
                     add = !state.skip_chapters.contains(&s);
                     if add {
-                        let _ = writeln!(content, "_{s}_");
+                    writeln!(content, "_{s}_");
                     }
-                }
-                add = false;
                 continue;
             } else {
                 if !add || &el.name.local == "div" || &el.name.local == "table" || &el.name.local == "style" {
