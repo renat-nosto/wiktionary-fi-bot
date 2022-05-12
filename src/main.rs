@@ -152,7 +152,7 @@ async fn get_update(
     let par = match el.next().and_then(|o| o.parent()) {
         Some(x) => x,
         None => {
-            state.send_markdown(&message.chat, format!("{q} not found in Finnish"));
+            state.send_markdown(&message.chat, format!("{q} not found in Finnish\nhttps://en.wiktionary.org/wiki/{q}#Finnish"));
             println!("No parent of finish found");
             return ret;
         }
