@@ -8,6 +8,7 @@ edition = "2021"
 scraper = "0.12.0"
 telegram-bot = { git = "https://github.com/telegram-rs/telegram-bot" }
 axum = "0.5.3"
+axum-macros="0.2.0"
 ego-tree = "0.6.2"
 
 [dependencies.tokio]
