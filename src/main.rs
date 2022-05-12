@@ -96,9 +96,9 @@ async fn get_update(
 ) -> impl IntoResponse {
     println!("{:?}", update);
     let ret = (StatusCode::OK, Json(""));
-    // insert your application logic here
     let message = match update.kind {
         UpdateKind::Message(m) => m,
+        UpdateKind::EditedMessage(m) => m,
         _ => {
             println!("Not a message");
             return ret;
@@ -251,9 +251,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     );
 
     let app = Router::new()
-        // `GET /` goes to `root`
         .route("/health", get(root))
-        // `POST /users` goes to `get_update`
         .route(&path, post(get_update))
         .layer(Extension(Arc::new(state)));
 
