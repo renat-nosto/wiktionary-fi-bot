@@ -95,28 +95,67 @@ fn first_element_child(node: NodeRef<Node>) -> Option<ElementRef> {
     ElementRef::wrap(ElementRef::wrap(node)?.first_child()?)
 }
 
+fn write_content(content: &mut String, e: ElementRef) {
+    e.children().for_each(|c| {
+        match c.value() {
+            Node::Text(t) => {
+                if !(content.ends_with(' ') || content.ends_with('\n') || t.starts_with(' ')) {
+                    content.push(' ');
+                }
+                content.push_str(&t.replace('*', ""));
+            }
+            Node::Element(e) => {
+                let tag: &str = &e.name.local;
+                let er = ElementRef::wrap(c).unwrap();
+                match tag {
+                    "table" | "sup" | "style" => {
+                        //skip
+                    }
+                    "i" => {
+                        if Some("fi") == e.attr("lang")
+                            && e.attr("class").filter(|x| x.contains("mention")).is_some()
+                        {
+                            content.push('/');
+                            content.push_str(&er.text().collect::<String>());
+                        }
+                    }
+                    _ => {
+                        write_content(content, er);
+                    }
+                }
+            }
+            _ => {}
+        }
+    });
+    content.push('\n');
+}
+
 struct MessageState<'a> {
     chat: &'a MessageChat,
     q: &'a str,
     state: &'a AppState,
+    link: String,
 }
 
 impl MessageState<'_> {
-    async fn les_link(&self) -> Option<String> {
-        let q = self.q;
+    async fn try_full_search(&mut self) -> bool {
         let link = format!(
-            "https://en.wiktionary.org/wiki/Special:Search?search={q}&fulltext=Full+text+search&ns0=1"
+            "https://en.wiktionary.org/wiki/Special:Search?search={}&fulltext=Full+text+search&ns0=1", self.q
         );
-        let fulltext = self.load(&link).await?;
+        let fulltext = match self.load(&link).await {
+            Some(x) => x,
+            _ => return false,
+        };
         let res = fulltext
             .select(&self.state.selectors.search_result)
             .collect::<Vec<_>>();
         if let Some(first_el) = res.first() {
             if let Some(found_link) = first_el.value().attr("href") {
-                return Some(format!("https://en.wiktionary.org{found_link}"));
+                self.link = format!("https://en.wiktionary.org{found_link}");
+                return true;
             }
         }
-        None
+        false
     }
 
     async fn load(&self, link: &str) -> Option<Html> {
@@ -136,7 +175,7 @@ impl MessageState<'_> {
         Some(html)
     }
 
-    fn send_article(&self, html: &Html, par: &NodeRef<Node>, q: &str) {
+    fn send_article(&self, html: &Html, par: &NodeRef<Node>) {
         let mut add = false;
         let mut content = String::new();
 
@@ -163,13 +202,7 @@ impl MessageState<'_> {
                         continue;
                     }
                     if let Some(e) = ElementRef::wrap(node) {
-                        e.text()
-                            .filter(|e| *e != "edit")
-                            .map(|s| s.replace('*', ""))
-                            .for_each(|s| {
-                                let _ = write!(content, "{s}");
-                            });
-                        let _ = writeln!(content);
+                        write_content(&mut content, e);
                     }
                 }
             }
@@ -206,15 +239,27 @@ impl MessageState<'_> {
             let _ = writeln!(content);
         }
 
-        let _ = writeln!(content, "https://en.wiktionary.org/wiki/{q}#Finnish");
+        let _ = writeln!(content, "{}", &self.link);
         println!("sending: {:?}", content);
+        let q = self.q;
         self.state
             .send_markdown(&self.chat, format!("*{q}*\n{content}"));
     }
 
-    async fn send_link(&self, link: &str) -> State {
-        let q = self.q;
-        let html = match self.load(&link).await {
+    //
+    //
+    // fn write_content3(content: &mut String, e: ElementRef) {
+    //     e.text()
+    //         .filter(|e| *e != "edit")
+    //         .map(|s| s.replace('*', ""))
+    //         .for_each(|s| {
+    //             let _ = write!(content, "{s}");
+    //         });
+    //     let _ = writeln!(content);
+    // }
+
+    async fn send_link(&self) -> State {
+        let html = match self.load(&self.link).await {
             Some(html) => html,
             None => return State::Err,
         };
@@ -225,7 +270,7 @@ impl MessageState<'_> {
             .and_then(|o| o.parent())
         {
             Some(x) => {
-                self.send_article(&html, &x, q);
+                self.send_article(&html, &x);
                 State::Sent
             }
             None => State::Missing,
@@ -266,7 +311,7 @@ async fn get_update(
         MessageChat::Group(_) | MessageChat::Supergroup(_)
     );
     let q = if is_group {
-        if let Some(text) = text.strip_prefix("/w ").or_else(|| text.strip_prefix("/")) {
+        if let Some(text) = text.strip_prefix("/w ").or_else(|| text.strip_prefix('/')) {
             text
         } else {
             println!("Bad Query: {:?}", text);
@@ -277,19 +322,23 @@ async fn get_update(
     };
 
     println!("Query: {:?}", q);
-    let message_state = MessageState {
+    let mut message_state = MessageState {
         chat: &message.chat,
         q,
         state: &*state,
+        link: format!("https://en.wiktionary.org/wiki/{q}"),
     };
 
-    let link = format!("https://en.wiktionary.org/w/index.php?search={q}&go=Go");
-    match message_state.send_link(&link).await {
+    match message_state.send_link().await {
         State::Sent => {}
         State::Err => {}
         State::Missing => {
-            if let Some(l) = message_state.les_link().await {
-                message_state.send_link(&l).await;
+            if message_state.try_full_search().await {
+                message_state.send_link().await;
+            } else {
+                message_state
+                    .state
+                    .send_markdown(&message_state.chat, format!("*{q}*\nNo article found"));
             }
         }
     }
@@ -332,4 +381,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap();
 
     Ok(())
+}
+
+#[test]
+fn test1() {
+    let html = Html::parse_document(
+        r#"<!doctype html><meta charset=utf-8><title>shortest html5</title><body><p><i class="Latn mention" lang="fi"><a href="/wiki/mainos#Finnish" title="mainos">mainos</a></i> + <i class="Latn mention" lang="fi"><a href="/wiki/-taa#Finnish" title="-taa">-taa</a></i></p>"#,
+    );
+    let s = make_selector("p");
+    let x = html.select(&s).next().unwrap();
+    let mut s = String::new();
+    write_content(&mut s, x);
+    assert_eq!(s, "/mainos + /-taa\n");
 }
