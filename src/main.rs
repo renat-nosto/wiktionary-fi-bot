@@ -95,15 +95,25 @@ fn first_element_child(node: NodeRef<Node>) -> Option<ElementRef> {
     ElementRef::wrap(ElementRef::wrap(node)?.first_child()?)
 }
 
+fn push_no_double_whitespace(buf: &mut String, c: char) {
+    if let Some(last) = buf.chars().last() {
+        if last.is_whitespace() && c.is_whitespace() {
+            return;
+        }
+    }
+    buf.push(c);
+}
+
 fn write_content(content: &mut String, e: ElementRef) {
     e.children().for_each(|c| {
         match c.value() {
             Node::Text(t) => {
-                if !(content.ends_with(' ') || content.ends_with('\n') || t.starts_with(' ')) {
-                    content.push(' ');
-                }
-                content.push_str(&t.replace('*', ""));
+                t.chars()
+                    .filter(|c| *c != '*')
+                    .map(|c| if c.is_whitespace() { ' ' } else { c })
+                    .for_each(|c| push_no_double_whitespace(content, c));
             }
+
             Node::Element(e) => {
                 let tag: &str = &e.name.local;
                 let er = ElementRef::wrap(c).unwrap();
@@ -113,10 +123,10 @@ fn write_content(content: &mut String, e: ElementRef) {
                     }
                     "i" => {
                         if Some("fi") == e.attr("lang")
-                            && e.attr("class").filter(|x| x.contains("mention")).is_some()
+                            && e.attr("class").filter(|x| x.contains("Latn")).is_some()
                         {
                             content.push('/');
-                            content.push_str(&er.text().collect::<String>());
+                            write_content(content, er);
                         }
                     }
                     _ => {
@@ -127,7 +137,6 @@ fn write_content(content: &mut String, e: ElementRef) {
             _ => {}
         }
     });
-    content.push('\n');
 }
 
 struct MessageState<'a> {
@@ -203,6 +212,7 @@ impl MessageState<'_> {
                     }
                     if let Some(e) = ElementRef::wrap(node) {
                         write_content(&mut content, e);
+                        content.push('\n')
                     }
                 }
             }
@@ -245,18 +255,6 @@ impl MessageState<'_> {
         self.state
             .send_markdown(&self.chat, format!("*{q}*\n{content}"));
     }
-
-    //
-    //
-    // fn write_content3(content: &mut String, e: ElementRef) {
-    //     e.text()
-    //         .filter(|e| *e != "edit")
-    //         .map(|s| s.replace('*', ""))
-    //         .for_each(|s| {
-    //             let _ = write!(content, "{s}");
-    //         });
-    //     let _ = writeln!(content);
-    // }
 
     async fn send_link(&self) -> State {
         let html = match self.load(&self.link).await {
@@ -386,11 +384,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 #[test]
 fn test1() {
     let html = Html::parse_document(
-        r#"<!doctype html><meta charset=utf-8><title>shortest html5</title><body><p><i class="Latn mention" lang="fi"><a href="/wiki/mainos#Finnish" title="mainos">mainos</a></i> + <i class="Latn mention" lang="fi"><a href="/wiki/-taa#Finnish" title="-taa">-taa</a></i></p>"#,
+        r#"<!doctype html><meta charset=utf-8><title>shortest html5</title><body><p><i class="Latn mention" lang="fi"><a href="/wiki/mainos#Finnish" title="mainos">mainos</a></i>
+         + <i class="Latn mention" lang="fi"><a href="/wiki/-taa#Finnish" title="-taa">-taa</a></i></p>"#,
     );
     let s = make_selector("p");
     let x = html.select(&s).next().unwrap();
     let mut s = String::new();
     write_content(&mut s, x);
-    assert_eq!(s, "/mainos + /-taa\n");
+    assert_eq!(s, "/mainos + /-taa");
 }
