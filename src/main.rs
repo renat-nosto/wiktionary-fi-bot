@@ -9,7 +9,8 @@ use reqwest::{Client, StatusCode};
 use scraper::{ElementRef, Html, Node, Selector};
 use std::{collections::HashSet, error::Error, fmt::Write, net::SocketAddr, sync::Arc};
 use telegram_bot::{
-    Api, MessageChat, MessageKind, ParseMode::Markdown, SendMessage, ToChatRef, Update, UpdateKind,
+    Api, InlineKeyboardButton, InlineKeyboardMarkup, MessageChat, MessageKind, ParseMode::Markdown,
+    SendMessage, Update, UpdateKind,
 };
 
 fn make_selector(selector: &str) -> Selector {
@@ -79,11 +80,6 @@ impl AppState {
             .collect(),
         }
     }
-
-    fn send_markdown<C: ToChatRef>(&self, chat: C, text: String) {
-        self.api
-            .spawn(SendMessage::new(chat, text).parse_mode(Markdown));
-    }
 }
 
 // basic handler that responds with a static string
@@ -104,7 +100,7 @@ fn push_no_double_whitespace(buf: &mut String, c: char) {
     buf.push(c);
 }
 
-fn write_content(content: &mut String, e: ElementRef) {
+fn write_content(content: &mut String, e: ElementRef, refs: &mut Vec<String>) {
     e.children().for_each(|c| {
         match c.value() {
             Node::Text(t) => {
@@ -125,12 +121,12 @@ fn write_content(content: &mut String, e: ElementRef) {
                         if Some("fi") == e.attr("lang")
                             && e.attr("class").filter(|x| x.contains("Latn")).is_some()
                         {
-                            content.push('/');
-                            write_content(content, er);
+                            refs.push(er.text().collect::<String>());
+                            write_content(content, er, refs);
                         }
                     }
                     _ => {
-                        write_content(content, er);
+                        write_content(content, er, refs);
                     }
                 }
             }
@@ -144,6 +140,7 @@ struct MessageState<'a> {
     q: &'a str,
     state: &'a AppState,
     link: String,
+    refs: Vec<String>,
 }
 
 impl MessageState<'_> {
@@ -171,8 +168,7 @@ impl MessageState<'_> {
         let text = match self.state.client.get(link).send().await {
             Ok(val) => val,
             Err(err) => {
-                self.state
-                    .send_markdown(self.chat, format!("{link} - error {err:?}"));
+                self.send_markdown(format!("{link} - error {err:?}"));
                 println!("Err {:?}", err);
                 return None;
             }
@@ -184,7 +180,20 @@ impl MessageState<'_> {
         Some(html)
     }
 
-    fn send_article(&self, html: &Html, par: &NodeRef<Node>) {
+    fn send_markdown(&self, text: String) {
+        let mut message = SendMessage::new(self.chat, text);
+        message.parse_mode(Markdown);
+        if !self.refs.is_empty() {
+            message.reply_markup(InlineKeyboardMarkup::from(vec![self
+                .refs
+                .iter()
+                .map(|s| InlineKeyboardButton::callback(s, s))
+                .collect()]));
+        }
+        self.state.api.spawn(message);
+    }
+
+    fn send_article(&mut self, html: &Html, par: &NodeRef<Node>) {
         let mut add = false;
         let mut content = String::new();
 
@@ -196,10 +205,13 @@ impl MessageState<'_> {
                 if &el.name.local == "h3" || &el.name.local == "h4" {
                     let s: String = first_element_child(node)
                         .map(|e| e.inner_html())
-                        .unwrap_or("".into());
-                    add = !self.state.skip_chapters.contains(&s);
+                        .unwrap_or_else(|| "".into());
+                    let s_clean = s.trim_end_matches("edit");
+                    add = !self.state.skip_chapters.contains(s_clean);
                     if add {
-                        let _ = writeln!(content, "_{s}_");
+                        content.push_str("\n_");
+                        content.push_str(s_clean);
+                        content.push('_');
                     }
                     continue;
                 } else {
@@ -211,7 +223,7 @@ impl MessageState<'_> {
                         continue;
                     }
                     if let Some(e) = ElementRef::wrap(node) {
-                        write_content(&mut content, e);
+                        write_content(&mut content, e, &mut self.refs);
                         content.push('\n')
                     }
                 }
@@ -252,11 +264,10 @@ impl MessageState<'_> {
         let _ = writeln!(content, "{}", &self.link);
         println!("sending: {:?}", content);
         let q = self.q;
-        self.state
-            .send_markdown(&self.chat, format!("*{q}*\n{content}"));
+        self.send_markdown(format!("*{q}*\n{content}"));
     }
 
-    async fn send_link(&self) -> State {
+    async fn send_link(&mut self) -> State {
         let html = match self.load(&self.link).await {
             Some(html) => html,
             None => return State::Err,
@@ -325,6 +336,7 @@ async fn get_update(
         q,
         state: &*state,
         link: format!("https://en.wiktionary.org/wiki/{q}"),
+        refs: Vec::new(),
     };
 
     match message_state.send_link().await {
@@ -334,9 +346,7 @@ async fn get_update(
             if message_state.try_full_search().await {
                 message_state.send_link().await;
             } else {
-                message_state
-                    .state
-                    .send_markdown(&message_state.chat, format!("*{q}*\nNo article found"));
+                message_state.send_markdown(format!("*{q}*\nNo article found"));
             }
         }
     }
@@ -390,6 +400,6 @@ fn test1() {
     let s = make_selector("p");
     let x = html.select(&s).next().unwrap();
     let mut s = String::new();
-    write_content(&mut s, x);
+    write_content(&mut s, x, &mut Vec::new());
     assert_eq!(s, "/mainos + /-taa");
 }
