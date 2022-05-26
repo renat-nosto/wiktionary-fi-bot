@@ -91,6 +91,14 @@ fn first_element_child(node: NodeRef<Node>) -> Option<ElementRef> {
     ElementRef::wrap(ElementRef::wrap(node)?.first_child()?)
 }
 
+fn header_text(node: NodeRef<Node>) -> String {
+    let s: String = first_element_child(node)
+        .map(|e| e.inner_html())
+        .unwrap_or_else(|| "".into());
+    let s_clean = s.trim_end_matches("edit");
+    s_clean.to_string()
+}
+
 fn push_no_double_whitespace(buf: &mut String, c: char) {
     if let Some(last) = buf.chars().last() {
         if last.is_whitespace() && c.is_whitespace() {
@@ -136,8 +144,8 @@ fn write_content(content: &mut String, e: ElementRef, refs: &mut Vec<String>) {
 }
 
 struct MessageState<'a> {
-    chat: &'a MessageChat,
-    q: &'a str,
+    chat: MessageChat,
+    q: String,
     state: &'a AppState,
     link: String,
     refs: Vec<String>,
@@ -181,7 +189,7 @@ impl MessageState<'_> {
     }
 
     fn send_markdown(&self, text: String) {
-        let mut message = SendMessage::new(self.chat, text);
+        let mut message = SendMessage::new(&self.chat, text);
         message.parse_mode(Markdown);
         if !self.refs.is_empty() {
             message.reply_markup(InlineKeyboardMarkup::from(vec![self
@@ -202,16 +210,13 @@ impl MessageState<'_> {
                 if "h2" == &el.name.local {
                     break;
                 }
-                if &el.name.local == "h3" || &el.name.local == "h4" {
-                    let s: String = first_element_child(node)
-                        .map(|e| e.inner_html())
-                        .unwrap_or_else(|| "".into());
-                    let s_clean = s.trim_end_matches("edit");
-                    add = !self.state.skip_chapters.contains(s_clean);
+                if &el.name.local == "h3" || &el.name.local == "h4" || &el.name.local == "h5" {
+                    let s_clean = header_text(node);
+                    add = !self.state.skip_chapters.contains(&s_clean);
                     if add {
                         content.push_str("\n_");
-                        content.push_str(s_clean);
-                        content.push('_');
+                        content.push_str(&s_clean);
+                        content.push_str("_\n");
                     }
                     continue;
                 } else {
@@ -263,7 +268,7 @@ impl MessageState<'_> {
 
         let _ = writeln!(content, "{}", &self.link);
         println!("sending: {:?}", content);
-        let q = self.q;
+        let q = &self.q;
         self.send_markdown(format!("*{q}*\n{content}"));
     }
 
@@ -293,26 +298,26 @@ enum State {
     Missing,
 }
 
-#[debug_handler]
-async fn get_update(
-    Json(update): Json<Update>,
-    Extension(state): Extension<Arc<AppState>>,
-) -> impl IntoResponse {
-    println!("{:?}", update);
-    let ret = (StatusCode::OK, Json(""));
-    let message = match update.kind {
+fn get_query(update: &Update) -> Option<(String, MessageChat)> {
+    let message = match &update.kind {
         UpdateKind::Message(m) => m,
         UpdateKind::EditedMessage(m) => m,
+        UpdateKind::CallbackQuery(q) => {
+            return q
+                .data
+                .clone()
+                .map(|s| (s, MessageChat::Private(q.from.clone())));
+        }
         _ => {
             println!("Not a message");
-            return ret;
+            return None;
         }
     };
-    let text = match message.kind {
+    let text = match &message.kind {
         MessageKind::Text { data, entities: _ } => data.to_lowercase(),
         _ => {
             println!("Not a text");
-            return ret;
+            return None;
         }
     };
     let is_group = matches!(
@@ -324,18 +329,33 @@ async fn get_update(
             text
         } else {
             println!("Bad Query: {:?}", text);
-            return ret;
+            return None;
         }
     } else {
         text.trim_start_matches('/')
     };
+    Some((q.to_string(), message.chat.clone()))
+}
+
+#[debug_handler]
+async fn get_update(
+    Json(update): Json<Update>,
+    Extension(state): Extension<Arc<AppState>>,
+) -> impl IntoResponse {
+    println!("{:?}", update);
+    let ret = (StatusCode::OK, Json(""));
+    let (q, chat) = match get_query(&update) {
+        Some(q) => q,
+        None => return ret,
+    };
 
     println!("Query: {:?}", q);
+    let link = format!("https://en.wiktionary.org/wiki/{q}");
     let mut message_state = MessageState {
-        chat: &message.chat,
+        chat,
         q,
         state: &*state,
-        link: format!("https://en.wiktionary.org/wiki/{q}"),
+        link,
         refs: Vec::new(),
     };
 
@@ -346,7 +366,7 @@ async fn get_update(
             if message_state.try_full_search().await {
                 message_state.send_link().await;
             } else {
-                message_state.send_markdown(format!("*{q}*\nNo article found"));
+                message_state.send_markdown(format!("*{}*\nNo article found", message_state.q));
             }
         }
     }
