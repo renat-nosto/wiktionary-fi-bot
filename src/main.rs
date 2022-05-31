@@ -8,6 +8,7 @@ use ego_tree::NodeRef;
 use reqwest::{Client, StatusCode};
 use scraper::{ElementRef, Html, Node, Selector};
 use std::{collections::HashSet, error::Error, fmt::Write, net::SocketAddr, sync::Arc};
+use std::collections::BTreeSet;
 use telegram_bot::{
     Api, InlineKeyboardButton, InlineKeyboardMarkup, MessageChat, MessageKind, ParseMode::Markdown,
     SendMessage, Update, UpdateKind,
@@ -108,7 +109,7 @@ fn push_no_double_whitespace(buf: &mut String, c: char) {
     buf.push(c);
 }
 
-fn write_content(content: &mut String, e: ElementRef, refs: &mut Vec<String>) {
+fn write_content(content: &mut String, e: ElementRef, refs: &mut BTreeSet<String>) {
     e.children().for_each(|c| {
         match c.value() {
             Node::Text(t) => {
@@ -129,7 +130,7 @@ fn write_content(content: &mut String, e: ElementRef, refs: &mut Vec<String>) {
                         if Some("fi") == e.attr("lang")
                             && e.attr("class").filter(|x| x.contains("Latn")).is_some()
                         {
-                            refs.push(er.text().collect::<String>());
+                            refs.insert(er.text().collect::<String>());
                             write_content(content, er, refs);
                         }
                     }
@@ -148,7 +149,7 @@ struct MessageState<'a> {
     q: String,
     state: &'a AppState,
     link: String,
-    refs: Vec<String>,
+    refs: BTreeSet<String>,
 }
 
 impl MessageState<'_> {
@@ -192,11 +193,18 @@ impl MessageState<'_> {
         let mut message = SendMessage::new(&self.chat, text);
         message.parse_mode(Markdown);
         if !self.refs.is_empty() {
-            message.reply_markup(InlineKeyboardMarkup::from(vec![self
+            let items = self
                 .refs
                 .iter()
                 .map(|s| InlineKeyboardButton::callback(s, s))
-                .collect()]));
+                .collect::<Vec<_>>();
+            let vec = items
+                .chunks(5)
+                .map(|c| c.to_vec())
+                .collect::<Vec<_>>();
+            message.reply_markup(InlineKeyboardMarkup::from(
+                vec
+            ));
         }
         self.state.api.spawn(message);
     }
@@ -356,7 +364,7 @@ async fn get_update(
         q,
         state: &*state,
         link,
-        refs: Vec::new(),
+        refs: BTreeSet::new(),
     };
 
     match message_state.send_link().await {
