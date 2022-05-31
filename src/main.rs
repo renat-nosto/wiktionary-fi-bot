@@ -428,6 +428,6 @@ fn test1() {
     let s = make_selector("p");
     let x = html.select(&s).next().unwrap();
     let mut s = String::new();
-    write_content(&mut s, x, &mut Vec::new());
+    write_content(&mut s, x, &mut BTreeSet::new());
     assert_eq!(s, "/mainos + /-taa");
 }
