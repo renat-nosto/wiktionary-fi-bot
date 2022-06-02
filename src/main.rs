@@ -7,8 +7,8 @@ use axum_macros::debug_handler;
 use ego_tree::NodeRef;
 use reqwest::{Client, StatusCode};
 use scraper::{ElementRef, Html, Node, Selector};
-use std::{collections::HashSet, error::Error, fmt::Write, net::SocketAddr, sync::Arc};
 use std::collections::BTreeSet;
+use std::{collections::HashSet, error::Error, fmt::Write, net::SocketAddr, sync::Arc};
 use telegram_bot::{
     Api, InlineKeyboardButton, InlineKeyboardMarkup, MessageChat, MessageKind, ParseMode::Markdown,
     SendMessage, Update, UpdateKind,
@@ -131,8 +131,8 @@ fn write_content(content: &mut String, e: ElementRef, refs: &mut BTreeSet<String
                             && e.attr("class").filter(|x| x.contains("Latn")).is_some()
                         {
                             refs.insert(er.text().collect::<String>());
-                            write_content(content, er, refs);
                         }
+                        write_content(content, er, refs);
                     }
                     _ => {
                         write_content(content, er, refs);
@@ -198,13 +198,8 @@ impl MessageState<'_> {
                 .iter()
                 .map(|s| InlineKeyboardButton::callback(s, s))
                 .collect::<Vec<_>>();
-            let vec = items
-                .chunks(5)
-                .map(|c| c.to_vec())
-                .collect::<Vec<_>>();
-            message.reply_markup(InlineKeyboardMarkup::from(
-                vec
-            ));
+            let vec = items.chunks(5).map(|c| c.to_vec()).collect::<Vec<_>>();
+            message.reply_markup(InlineKeyboardMarkup::from(vec));
         }
         self.state.api.spawn(message);
     }
