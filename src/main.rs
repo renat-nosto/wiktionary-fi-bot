@@ -274,7 +274,7 @@ impl MessageState<'_> {
         self.refs = html
             .select(&self.state.selectors.more_links)
             .map(|e| e.value())
-            .filter(|e| e.attr("href").map(|x| x.ends_with("#Finnish")).unwrap_or(false))
+            .filter(|e| e.attr("href").map(|x| x.ends_with("#Finnish") || !x.contains('#')).unwrap_or(false))
             .filter_map(|e| e.attr("title").map(|x| x.to_string()))
             .collect::<BTreeSet<_>>();
         self.send_markdown(format!("*{q}*\n{content}"));
