@@ -23,6 +23,7 @@ struct Selectors {
     nouns: Vec<Selector>,
     verbs: Vec<Selector>,
     search_result: Selector,
+    more_links:Selector,
 }
 
 impl Selectors {
@@ -46,6 +47,7 @@ impl Selectors {
                 })
                 .collect(),
             search_result: make_selector(".mw-search-result-heading a"),
+            more_links: make_selector("i a[title]"),
         }
     }
 }
@@ -109,7 +111,7 @@ fn push_no_double_whitespace(buf: &mut String, c: char) {
     buf.push(c);
 }
 
-fn write_content(content: &mut String, e: ElementRef, refs: &mut BTreeSet<String>) {
+fn write_content(content: &mut String, e: ElementRef) {
     e.children().for_each(|c| {
         match c.value() {
             Node::Text(t) => {
@@ -127,15 +129,12 @@ fn write_content(content: &mut String, e: ElementRef, refs: &mut BTreeSet<String
                         //skip
                     }
                     "i" => {
-                        if Some("fi") == e.attr("lang")
-                            && e.attr("class").filter(|x| x.contains("Latn")).is_some()
-                        {
-                            refs.insert(er.text().collect::<String>());
-                        }
-                        write_content(content, er, refs);
+                        content.push('_');
+                        write_content(content, er);
+                        content.push('_');
                     }
                     _ => {
-                        write_content(content, er, refs);
+                        write_content(content, er);
                     }
                 }
             }
@@ -231,7 +230,7 @@ impl MessageState<'_> {
                         continue;
                     }
                     if let Some(e) = ElementRef::wrap(node) {
-                        write_content(&mut content, e, &mut self.refs);
+                        write_content(&mut content, e);
                         content.push('\n')
                     }
                 }
@@ -272,6 +271,12 @@ impl MessageState<'_> {
         let _ = writeln!(content, "{}", &self.link);
         println!("sending: {:?}", content);
         let q = &self.q;
+        self.refs = html
+            .select(&self.state.selectors.more_links)
+            .map(|e| e.value())
+            .filter(|e| e.attr("href").map(|x| x.ends_with("#Finnish")).unwrap_or(false))
+            .filter_map(|e| e.attr("title").map(|x| x.to_string()))
+            .collect::<BTreeSet<_>>();
         self.send_markdown(format!("*{q}*\n{content}"));
     }
 
@@ -423,6 +428,6 @@ fn test1() {
     let s = make_selector("p");
     let x = html.select(&s).next().unwrap();
     let mut s = String::new();
-    write_content(&mut s, x, &mut BTreeSet::new());
+    write_content(&mut s, x);
     assert_eq!(s, "/mainos + /-taa");
 }
