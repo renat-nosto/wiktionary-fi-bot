@@ -128,7 +128,9 @@ fn write_content(content: &mut String, e: ElementRef, refs: &mut BTreeSet<String
                     }
                     "a" => {
                         if let Some(t) = e.attr("title") {
-                            refs.insert(t.to_string());
+                            if !t.starts_with("w:") && !t.starts_with("Reconstruction:") {
+                                refs.insert(t.to_string());
+                            }
                         }
                         write_content(content, er, refs);
                     }
