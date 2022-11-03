@@ -1,22 +1,35 @@
 [package]
 name = "fiwiki"
 version = "0.1.0"
+authors = ["Renat Vasilyev <renat.vasilyev@nosto.com>"]
 edition = "2021"
+description = "Telegram bot to get translations from finish from wiki"
+repository="https://github.com/renat-nosto/wiktionary-fi-bot"
+license="MIT"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["console_error_panic_hook"]
 
 [dependencies]
+cfg-if = "1.0.0"
+worker = "0.0.11"
+serde_json = "1.0.67"
+
+
 scraper = "0.13.0"
-telegram-bot = { git = "https://github.com/telegram-rs/telegram-bot" }
-axum = "0.5.3"
-axum-macros="0.2.0"
+telegram-bot-raw = { git = "https://github.com/telegram-rs/telegram-bot" }
 ego-tree = "0.6.2"
 
-[dependencies.tokio]
-version = "1.17.0"
-features = ["full"]
 
-[dependencies.reqwest]
-version = "0.11"
-features = ["rustls", "gzip"]
+# The `console_error_panic_hook` crate provides better debugging of panics by
+# logging them with `console.error`. This is great for development, but requires
+# all the `std::fmt` and `std::panicking` infrastructure, so isn't great for
+# code size when deploying.
+console_error_panic_hook = { version = "0.1.1", optional = true }
 
-
+[profile.release]
+# Tell `rustc` to optimize for small code size.
+opt-level = "s"
