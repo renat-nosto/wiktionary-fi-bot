@@ -178,8 +178,8 @@ impl MessageState<'_> {
         false
     }
 
-    async fn load(&self, link: &str) -> Option<Html> {
-        let text = match self.state.client.get(link).send().await {
+    async fn get(&self, link: &str) -> Option<String> {
+        Some(match self.state.client.get(link).send().await {
             Ok(val) => val,
             Err(err) => {
                 self.send_markdown(format!("{link} - error {err:?}"));
@@ -187,9 +187,13 @@ impl MessageState<'_> {
                 return None;
             }
         }
-        .text()
-        .await
-        .expect("failed to read text");
+            .text()
+            .await
+            .expect("failed to read text"))
+    }
+
+    async fn load(&self, link: &str) -> Option<Html> {
+        let text =self.get(link).await?;
         let html = Html::parse_document(&text);
         Some(html)
     }
@@ -206,10 +210,39 @@ impl MessageState<'_> {
             let vec = items.chunks(4).map(|c| c.to_vec()).collect::<Vec<_>>();
             message.reply_markup(InlineKeyboardMarkup::from(vec));
         }
-        self.state.api.spawn(message);
+        self.send(message);
+    }
+
+    fn send(&self, message: SendMessage) {
+        self.state.api.spawn(message)
     }
 
     fn send_article(&mut self, html: &Html, par: &NodeRef<Node>) {
+        let mut content = self.get_main_content(par);
+        let [ns, vs] = self.get_forms(html);
+        Self::write_noun_forms(&mut content, ns);
+        Self::write_verb_forms(&mut content, vs);
+
+        let _ = writeln!(content, "{}", &self.link);
+        println!("sending: {:?}", content);
+        let q = &self.q;
+        self.send_markdown(format!("*{q}*\n{content}"));
+    }
+
+    fn get_forms(&mut self, html: &Html) -> [Vec<Option<String>>;2] {
+        [&self.state.selectors.nouns, &self.state.selectors.verbs].map(|sels| {
+            sels.iter()
+                .map(|sel| {
+                    html.select(sel)
+                        .next()
+                        .map(|e| e.text().collect::<String>())
+                })
+                .collect::<Vec<_>>()
+        })
+
+    }
+
+    fn get_main_content(&mut self, par: &NodeRef<Node>) -> String {
         let mut add = false;
         let mut content = String::new();
 
@@ -242,15 +275,10 @@ impl MessageState<'_> {
                 }
             }
         }
-        let [ns, vs] = [&self.state.selectors.nouns, &self.state.selectors.verbs].map(|sels| {
-            sels.iter()
-                .map(|sel| {
-                    html.select(sel)
-                        .next()
-                        .map(|e| e.text().collect::<String>())
-                })
-                .collect::<Vec<_>>()
-        });
+        content
+    }
+
+    fn write_noun_forms(content: &mut String, ns: Vec<Option<String>>) {
         if let [Some(par_s), Some(par_p), Some(ines_s), Some(ines_p)] = ns.as_slice() {
             let vartalo = ines_s.trim_end_matches("lle");
             let mon_vartalo = ines_p.trim_end_matches("lle");
@@ -259,6 +287,9 @@ impl MessageState<'_> {
                 "_Vartalot_\n{vartalo} - {mon_vartalo} p. {par_s} m.p. {par_p}"
             );
         }
+    }
+
+    fn write_verb_forms(content: &mut String, vs: Vec<Option<String>>) {
         if let [Some(pr1), Some(pr3), Some(pa1), Some(pa3)] = vs.as_slice() {
             let vartalo = pr1.trim_end_matches('n');
             let past_vartalo = pa1.trim_end_matches('n');
@@ -273,11 +304,6 @@ impl MessageState<'_> {
             }
             let _ = writeln!(content);
         }
-
-        let _ = writeln!(content, "{}", &self.link);
-        println!("sending: {:?}", content);
-        let q = &self.q;
-        self.send_markdown(format!("*{q}*\n{content}"));
     }
 
     async fn send_link(&mut self) -> State {
